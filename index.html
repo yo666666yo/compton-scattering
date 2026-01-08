@@ -1,0 +1,530 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>康普顿效应交互仿真 | Compton Scattering</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #0f172a 0%, #1e3a5f 50%, #0f172a 100%);
+            min-height: 100vh;
+            padding: 16px;
+        }
+        .container { max-width: 1200px; margin: 0 auto; }
+        .title { text-align: center; margin-bottom: 24px; }
+        .title h1 { color: white; font-size: 28px; margin-bottom: 8px; }
+        .title p { color: #93c5fd; font-size: 14px; }
+        .main-grid { display: grid; grid-template-columns: 1fr; gap: 16px; }
+        @media (min-width: 1024px) { .main-grid { grid-template-columns: 2fr 1fr; } }
+        .card {
+            background: rgba(30, 41, 59, 0.7);
+            border-radius: 12px;
+            padding: 16px;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(59, 130, 246, 0.2);
+        }
+        canvas {
+            width: 100%;
+            border-radius: 8px;
+            border: 1px solid rgba(59, 130, 246, 0.3);
+        }
+        .btn-group { display: flex; gap: 12px; margin-top: 16px; justify-content: center; flex-wrap: wrap; }
+        .btn {
+            padding: 10px 24px;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .btn-green { background: #16a34a; color: white; }
+        .btn-green:hover { background: #22c55e; }
+        .btn-green:disabled { background: #4b5563; cursor: not-allowed; }
+        .btn-blue { background: #2563eb; color: white; }
+        .btn-blue:hover { background: #3b82f6; }
+        .btn-purple { background: #7c3aed; color: white; }
+        .btn-purple:hover { background: #8b5cf6; }
+        .panel-title { color: white; font-size: 18px; font-weight: 600; margin-bottom: 16px; }
+        .slider-group { margin-bottom: 20px; }
+        .slider-label { color: #93c5fd; font-size: 14px; margin-bottom: 8px; display: block; }
+        .slider {
+            width: 100%;
+            height: 8px;
+            border-radius: 4px;
+            background: #1e3a5f;
+            outline: none;
+            -webkit-appearance: none;
+        }
+        .slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            background: #3b82f6;
+            cursor: pointer;
+        }
+        .slider-hints { display: flex; justify-content: space-between; font-size: 11px; color: #6b7280; margin-top: 4px; }
+        .result-row { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid rgba(255,255,255,0.1); }
+        .result-label { color: #bfdbfe; font-size: 13px; }
+        .result-value { font-family: 'Consolas', monospace; font-size: 13px; }
+        .yellow { color: #fde047; }
+        .green { color: #4ade80; }
+        .cyan { color: #22d3ee; }
+        .red { color: #f87171; }
+        .orange { color: #fb923c; }
+        .formula-box {
+            background: rgba(15, 23, 42, 0.6);
+            padding: 12px;
+            border-radius: 8px;
+            margin-bottom: 12px;
+            text-align: center;
+        }
+        .formula { font-family: 'Consolas', monospace; font-size: 15px; margin-bottom: 4px; }
+        .formula-desc { color: #9ca3af; font-size: 11px; }
+        .principle-grid { display: grid; grid-template-columns: 1fr; gap: 16px; }
+        @media (min-width: 768px) { .principle-grid { grid-template-columns: 1fr 1fr; } }
+        .principle-title { color: #fde047; font-weight: 500; margin-bottom: 8px; font-size: 14px; }
+        .principle-text { color: #d1d5db; font-size: 13px; line-height: 1.6; }
+        .principle-list { color: #d1d5db; font-size: 13px; line-height: 1.8; list-style: none; }
+        .right-panels { display: flex; flex-direction: column; gap: 16px; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef, useCallback } = React;
+
+        // 物理常数
+        const h = 6.626e-34;
+        const c = 3e8;
+        const m_e = 9.109e-31;
+        const lambda_c = h / (m_e * c);
+
+        function ComptonScattering() {
+            const [wavelength, setWavelength] = useState(0.071);
+            const [scatterAngle, setScatterAngle] = useState(90);
+            const [isPlaying, setIsPlaying] = useState(false);
+            const [animationPhase, setAnimationPhase] = useState('ready');
+            const [showFormulas, setShowFormulas] = useState(true);
+
+            const canvasRef = useRef(null);
+            const animationRef = useRef(null);
+            const particlesRef = useRef({
+                photon: { x: 0, y: 250, visible: true },
+                electron: { x: 400, y: 250, vx: 0, vy: 0 },
+                scatteredPhoton: { x: 400, y: 250, visible: false }
+            });
+
+            // 物理计算
+            const lambda_nm = wavelength;
+            const lambda_m = wavelength * 1e-9;
+            const theta_rad = (scatterAngle * Math.PI) / 180;
+            const deltaLambda_m = lambda_c * (1 - Math.cos(theta_rad));
+            const deltaLambda_nm = deltaLambda_m * 1e9;
+            const lambda_prime_nm = lambda_nm + deltaLambda_nm;
+            const lambda_prime_m = lambda_prime_nm * 1e-9;
+            const E_photon = (h * c) / lambda_m;
+            const E_photon_keV = E_photon / 1.602e-16;
+            const E_scattered = (h * c) / lambda_prime_m;
+            const E_scattered_keV = E_scattered / 1.602e-16;
+            const E_electron_keV = E_photon_keV - E_scattered_keV;
+            const cotPhi = (1 + E_photon / (m_e * c * c)) * Math.tan(theta_rad / 2);
+            const phi_rad = Math.atan(1 / cotPhi);
+            const phi_deg = (phi_rad * 180) / Math.PI;
+
+            const getPhotonColor = (wl) => {
+                const intensity = Math.max(0.3, 1 - wl / 0.2);
+                return `rgba(100, ${Math.floor(150 * intensity)}, 255, ${0.7 + 0.3 * intensity})`;
+            };
+
+            const draw = useCallback(() => {
+                const canvas = canvasRef.current;
+                if (!canvas) return;
+
+                const ctx = canvas.getContext('2d');
+                const width = canvas.width;
+                const height = canvas.height;
+                const centerX = width / 2;
+                const centerY = height / 2;
+
+                ctx.fillStyle = '#0a1628';
+                ctx.fillRect(0, 0, width, height);
+
+                // 网格
+                ctx.strokeStyle = 'rgba(100, 150, 200, 0.1)';
+                ctx.lineWidth = 1;
+                for (let i = 0; i < width; i += 40) {
+                    ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, height); ctx.stroke();
+                }
+                for (let i = 0; i < height; i += 40) {
+                    ctx.beginPath(); ctx.moveTo(0, i); ctx.lineTo(width, i); ctx.stroke();
+                }
+
+                // 坐标轴
+                ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+                ctx.lineWidth = 2;
+                ctx.beginPath(); ctx.moveTo(50, centerY); ctx.lineTo(width - 50, centerY); ctx.stroke();
+
+                // 散射角指示
+                ctx.strokeStyle = 'rgba(255, 200, 100, 0.4)';
+                ctx.lineWidth = 1;
+                ctx.setLineDash([5, 5]);
+                ctx.beginPath();
+                ctx.moveTo(centerX, centerY);
+                ctx.lineTo(centerX + 150 * Math.cos(-theta_rad), centerY + 150 * Math.sin(-theta_rad));
+                ctx.stroke();
+                ctx.setLineDash([]);
+
+                ctx.strokeStyle = 'rgba(255, 200, 100, 0.6)';
+                ctx.beginPath();
+                ctx.arc(centerX, centerY, 50, 0, -theta_rad, true);
+                ctx.stroke();
+
+                ctx.fillStyle = '#ffc864';
+                ctx.font = '14px Arial';
+                ctx.fillText(`θ = ${scatterAngle}°`, centerX + 60, centerY - 20);
+
+                const particles = particlesRef.current;
+
+                // 入射光子
+                if (particles.photon.visible) {
+                    const photonX = particles.photon.x;
+                    const photonY = particles.photon.y;
+
+                    ctx.strokeStyle = getPhotonColor(wavelength);
+                    ctx.lineWidth = 3;
+                    ctx.beginPath();
+                    for (let i = 0; i < 60; i++) {
+                        const x = photonX - 60 + i;
+                        const y = photonY + Math.sin((i + Date.now() / 50) * 0.3) * 8;
+                        if (i === 0) ctx.moveTo(x, y);
+                        else ctx.lineTo(x, y);
+                    }
+                    ctx.stroke();
+
+                    ctx.beginPath();
+                    const gradient = ctx.createRadialGradient(photonX, photonY, 0, photonX, photonY, 15);
+                    gradient.addColorStop(0, 'rgba(200, 220, 255, 1)');
+                    gradient.addColorStop(0.5, getPhotonColor(wavelength));
+                    gradient.addColorStop(1, 'rgba(100, 150, 255, 0)');
+                    ctx.fillStyle = gradient;
+                    ctx.arc(photonX, photonY, 15, 0, Math.PI * 2);
+                    ctx.fill();
+
+                    if (animationPhase === 'ready' || animationPhase === 'incoming') {
+                        ctx.fillStyle = '#88ccff';
+                        ctx.font = '12px Arial';
+                        ctx.fillText(`λ = ${wavelength.toFixed(3)} nm`, photonX - 30, photonY - 25);
+                        ctx.fillText(`E = ${E_photon_keV.toFixed(1)} keV`, photonX - 30, photonY + 35);
+                    }
+                }
+
+                // 电子
+                const electronX = particles.electron.x;
+                const electronY = particles.electron.y;
+
+                ctx.strokeStyle = 'rgba(255, 100, 100, 0.3)';
+                ctx.lineWidth = 1;
+                for (let r = 20; r <= 35; r += 8) {
+                    ctx.beginPath(); ctx.arc(electronX, electronY, r, 0, Math.PI * 2); ctx.stroke();
+                }
+
+                const electronGradient = ctx.createRadialGradient(electronX, electronY, 0, electronX, electronY, 18);
+                electronGradient.addColorStop(0, '#ff6666');
+                electronGradient.addColorStop(0.6, '#cc3333');
+                electronGradient.addColorStop(1, 'rgba(200, 50, 50, 0)');
+                ctx.fillStyle = electronGradient;
+                ctx.beginPath();
+                ctx.arc(electronX, electronY, 18, 0, Math.PI * 2);
+                ctx.fill();
+
+                ctx.fillStyle = '#ff8888';
+                ctx.font = 'bold 14px Arial';
+                ctx.fillText('e⁻', electronX - 8, electronY + 5);
+
+                // 散射光子
+                if (particles.scatteredPhoton.visible) {
+                    const spX = particles.scatteredPhoton.x;
+                    const spY = particles.scatteredPhoton.y;
+
+                    ctx.strokeStyle = getPhotonColor(lambda_prime_nm);
+                    ctx.lineWidth = 2;
+                    ctx.beginPath();
+                    const angle = -theta_rad;
+                    for (let i = 0; i < 50; i++) {
+                        const baseX = spX + i * Math.cos(angle);
+                        const baseY = spY + i * Math.sin(angle);
+                        const perpX = Math.sin(angle);
+                        const perpY = -Math.cos(angle);
+                        const wave = Math.sin((i + Date.now() / 60) * 0.25) * 6;
+                        const x = baseX + perpX * wave;
+                        const y = baseY + perpY * wave;
+                        if (i === 0) ctx.moveTo(x, y);
+                        else ctx.lineTo(x, y);
+                    }
+                    ctx.stroke();
+
+                    const spGradient = ctx.createRadialGradient(spX, spY, 0, spX, spY, 12);
+                    spGradient.addColorStop(0, 'rgba(180, 200, 255, 1)');
+                    spGradient.addColorStop(0.5, getPhotonColor(lambda_prime_nm));
+                    spGradient.addColorStop(1, 'rgba(100, 150, 255, 0)');
+                    ctx.fillStyle = spGradient;
+                    ctx.beginPath();
+                    ctx.arc(spX, spY, 12, 0, Math.PI * 2);
+                    ctx.fill();
+
+                    if (animationPhase === 'scattered') {
+                        ctx.fillStyle = '#aaddff';
+                        ctx.font = '12px Arial';
+                        ctx.fillText(`λ' = ${lambda_prime_nm.toFixed(3)} nm`, spX + 20, spY - 15);
+                    }
+                }
+
+                // 反冲电子方向
+                if (animationPhase === 'scattered' && phi_deg > 0) {
+                    ctx.strokeStyle = 'rgba(255, 150, 150, 0.5)';
+                    ctx.setLineDash([3, 3]);
+                    ctx.beginPath();
+                    ctx.moveTo(centerX, centerY);
+                    ctx.lineTo(centerX + 100 * Math.cos(phi_rad), centerY + 100 * Math.sin(phi_rad));
+                    ctx.stroke();
+                    ctx.setLineDash([]);
+
+                    ctx.fillStyle = '#ff9999';
+                    ctx.font = '12px Arial';
+                    ctx.fillText(`φ = ${phi_deg.toFixed(1)}°`, centerX + 70, centerY + 50);
+                }
+
+                // 标题
+                ctx.fillStyle = '#ffffff';
+                ctx.font = 'bold 18px Arial';
+                ctx.fillText('康普顿散射 Compton Scattering', 20, 30);
+
+                const statusText = {
+                    ready: '点击「开始模拟」观察散射过程',
+                    incoming: '入射X射线光子...',
+                    collision: '碰撞！能量和动量交换',
+                    scattered: '散射完成 - 波长增大，电子获得动能'
+                };
+                ctx.fillStyle = '#88ff88';
+                ctx.font = '14px Arial';
+                ctx.fillText(statusText[animationPhase], 20, height - 20);
+            }, [wavelength, scatterAngle, animationPhase, theta_rad, lambda_prime_nm, E_photon_keV, phi_deg, phi_rad]);
+
+            const animate = useCallback(() => {
+                const particles = particlesRef.current;
+                const centerX = 400;
+                const centerY = 250;
+
+                if (animationPhase === 'incoming') {
+                    particles.photon.x += 4;
+                    if (particles.photon.x >= centerX - 20) {
+                        setAnimationPhase('collision');
+                        setTimeout(() => {
+                            particles.photon.visible = false;
+                            particles.scatteredPhoton.visible = true;
+                            particles.scatteredPhoton.x = centerX;
+                            particles.scatteredPhoton.y = centerY;
+                            setAnimationPhase('scattered');
+                        }, 300);
+                    }
+                } else if (animationPhase === 'scattered') {
+                    particles.scatteredPhoton.x += 3 * Math.cos(-theta_rad);
+                    particles.scatteredPhoton.y += 3 * Math.sin(-theta_rad);
+                    particles.electron.x += 2 * Math.cos(phi_rad);
+                    particles.electron.y += 2 * Math.sin(phi_rad);
+
+                    if (particles.scatteredPhoton.x > 800 || particles.electron.x > 800) {
+                        setIsPlaying(false);
+                    }
+                }
+
+                draw();
+
+                if (isPlaying) {
+                    animationRef.current = requestAnimationFrame(animate);
+                }
+            }, [animationPhase, isPlaying, draw, theta_rad, phi_rad]);
+
+            useEffect(() => {
+                if (isPlaying) {
+                    animationRef.current = requestAnimationFrame(animate);
+                }
+                return () => {
+                    if (animationRef.current) cancelAnimationFrame(animationRef.current);
+                };
+            }, [isPlaying, animate]);
+
+            useEffect(() => { draw(); }, [draw, wavelength, scatterAngle]);
+
+            const startSimulation = () => {
+                particlesRef.current = {
+                    photon: { x: 50, y: 250, visible: true },
+                    electron: { x: 400, y: 250, vx: 0, vy: 0 },
+                    scatteredPhoton: { x: 400, y: 250, visible: false }
+                };
+                setAnimationPhase('incoming');
+                setIsPlaying(true);
+            };
+
+            const resetSimulation = () => {
+                setIsPlaying(false);
+                particlesRef.current = {
+                    photon: { x: 50, y: 250, visible: true },
+                    electron: { x: 400, y: 250, vx: 0, vy: 0 },
+                    scatteredPhoton: { x: 400, y: 250, visible: false }
+                };
+                setAnimationPhase('ready');
+                setTimeout(draw, 50);
+            };
+
+            return (
+                <div className="container">
+                    <div className="title">
+                        <h1>康普顿效应交互仿真</h1>
+                        <p>Compton Scattering Interactive Simulation</p>
+                    </div>
+
+                    <div className="main-grid">
+                        <div>
+                            <div className="card">
+                                <canvas ref={canvasRef} width={800} height={500} />
+                                <div className="btn-group">
+                                    <button className="btn btn-green" onClick={startSimulation} disabled={isPlaying}>
+                                        ▶ 开始模拟
+                                    </button>
+                                    <button className="btn btn-blue" onClick={resetSimulation}>
+                                        ↺ 重置
+                                    </button>
+                                    <button className="btn btn-purple" onClick={() => setShowFormulas(!showFormulas)}>
+                                        {showFormulas ? '隐藏公式' : '显示公式'}
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="right-panels">
+                            <div className="card">
+                                <h3 className="panel-title">参数调节</h3>
+                                <div className="slider-group">
+                                    <label className="slider-label">
+                                        入射光子波长 λ: {wavelength.toFixed(3)} nm
+                                    </label>
+                                    <input
+                                        type="range" min="0.01" max="0.2" step="0.001"
+                                        value={wavelength}
+                                        onChange={(e) => { setWavelength(parseFloat(e.target.value)); if (!isPlaying) resetSimulation(); }}
+                                        className="slider"
+                                    />
+                                    <div className="slider-hints">
+                                        <span>0.01 nm (硬X射线)</span>
+                                        <span>0.2 nm (软X射线)</span>
+                                    </div>
+                                </div>
+                                <div className="slider-group">
+                                    <label className="slider-label">
+                                        散射角 θ: {scatterAngle}°
+                                    </label>
+                                    <input
+                                        type="range" min="0" max="180" step="1"
+                                        value={scatterAngle}
+                                        onChange={(e) => { setScatterAngle(parseInt(e.target.value)); if (!isPlaying) resetSimulation(); }}
+                                        className="slider"
+                                    />
+                                    <div className="slider-hints">
+                                        <span>0° (前向)</span>
+                                        <span>90°</span>
+                                        <span>180° (背向)</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="card">
+                                <h3 className="panel-title">计算结果</h3>
+                                <div className="result-row">
+                                    <span className="result-label">波长改变量 Δλ:</span>
+                                    <span className="result-value yellow">{(deltaLambda_nm * 1000).toFixed(4)} pm</span>
+                                </div>
+                                <div className="result-row">
+                                    <span className="result-label">散射后波长 λ':</span>
+                                    <span className="result-value green">{lambda_prime_nm.toFixed(4)} nm</span>
+                                </div>
+                                <div className="result-row">
+                                    <span className="result-label">入射光子能量:</span>
+                                    <span className="result-value cyan">{E_photon_keV.toFixed(2)} keV</span>
+                                </div>
+                                <div className="result-row">
+                                    <span className="result-label">散射光子能量:</span>
+                                    <span className="result-value cyan">{E_scattered_keV.toFixed(2)} keV</span>
+                                </div>
+                                <div className="result-row">
+                                    <span className="result-label">电子动能:</span>
+                                    <span className="result-value red">{E_electron_keV.toFixed(2)} keV</span>
+                                </div>
+                                <div className="result-row">
+                                    <span className="result-label">电子反冲角 φ:</span>
+                                    <span className="result-value orange">{phi_deg.toFixed(1)}°</span>
+                                </div>
+                            </div>
+
+                            {showFormulas && (
+                                <div className="card">
+                                    <h3 className="panel-title">核心公式</h3>
+                                    <div className="formula-box">
+                                        <div className="formula yellow">Δλ = λc(1 - cosθ)</div>
+                                        <div className="formula-desc">康普顿散射公式</div>
+                                    </div>
+                                    <div className="formula-box">
+                                        <div className="formula cyan">λc = h/(mₑc) ≈ 2.43 pm</div>
+                                        <div className="formula-desc">康普顿波长</div>
+                                    </div>
+                                    <div className="formula-box">
+                                        <div className="formula green">E = hc/λ</div>
+                                        <div className="formula-desc">光子能量</div>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+
+                    <div className="card" style={{marginTop: '16px'}}>
+                        <h3 className="panel-title">物理原理</h3>
+                        <div className="principle-grid">
+                            <div>
+                                <div className="principle-title">康普顿效应的意义</div>
+                                <p className="principle-text">
+                                    康普顿效应（1923年）证明了光具有粒子性。当X射线光子与自由电子碰撞时，
+                                    光子将部分能量和动量传递给电子，导致散射光子的波长增大。
+                                    这一现象无法用经典波动理论解释，只能用光的量子理论来理解。
+                                </p>
+                            </div>
+                            <div>
+                                <div className="principle-title">关键特征</div>
+                                <ul className="principle-list">
+                                    <li>• 波长改变量 Δλ 只与散射角 θ 有关，与入射波长无关</li>
+                                    <li>• θ = 0° 时，Δλ = 0（前向散射无波长改变）</li>
+                                    <li>• θ = 90° 时，Δλ = λc（康普顿波长）</li>
+                                    <li>• θ = 180° 时，Δλ = 2λc（最大波长改变）</li>
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div style={{textAlign: 'center', marginTop: '20px', color: '#6b7280', fontSize: '12px'}}>
+                        大学物理 · 康普顿散射仿真 | University Physics · Compton Scattering Simulation
+                    </div>
+                </div>
+            );
+        }
+
+        ReactDOM.createRoot(document.getElementById('root')).render(<ComptonScattering />);
+    </script>
+</body>
+</html>
